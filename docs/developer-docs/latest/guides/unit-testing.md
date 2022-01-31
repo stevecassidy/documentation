@@ -7,7 +7,6 @@ canonicalUrl: https://docs.strapi.io/developer-docs/latest/guides/unit-testing.h
 
 # Unit testing
 
-!!!include(developer-docs/latest/guides/snippets/guide-not-updated.md)!!!
 
 In this guide we will see how you can run basic unit tests for a Strapi application using a testing framework.
 
@@ -104,149 +103,149 @@ The whole file will look like this:
 }
 ```
 
-### Strapi instance
-
-In order to test anything we need to have a strapi instance that runs in the testing eviroment,
-basically we want to get instance of strapi app as object, similar like creating an instance for [process manager](process-manager.md).
-
-These tasks require adding some files - let's create a folder `tests` where all the tests will be put and inside it, next to folder `helpers` where main Strapi helper will be in file strapi.js.
-
-**Path —** `./tests/helpers/strapi.js`
-
-```js
-const Strapi = require('strapi');
-const http = require('http');
-
-let instance;
-
-async function setupStrapi() {
-  if (!instance) {
-    /** the following code in copied from `./node_modules/strapi/lib/Strapi.js` */
-    await Strapi().load();
-    instance = strapi; // strapi is global now
-    await instance.app
-      .use(instance.router.routes()) // populate KOA routes
-      .use(instance.router.allowedMethods()); // populate KOA methods
-
-    instance.server = http.createServer(instance.app.callback());
-  }
-  return instance;
-}
-module.exports = { setupStrapi };
-```
 
 ### Test strapi instance
 
-We need a main entry file for our tests, one that will also test our helper file.
+In order to test anything we need to have a strapi instance that runs in the testing eviroment, basically we want to get instance of strapi app as an object, similar like creating an instance for [process manager](process-manager.md).
+
+These tasks require adding some files - let's create a folder `tests` 
+where all the tests will be put and inside it, next to folder `helpers` 
+where main Strapi helper will be in file `strapi.js`.  This file defines 
+two helper functions that will be run before and after all of our
+ tests.  They create the Strapi instance and store it in a global 
+variable alongside a reference to the internal server that we'll use for 
+testing.
+
+**Path -** `./tests/helpers/strapi.js`
+
+```js
+const strapi = require('@strapi/strapi')
+const fs = require('fs');
+
+
+const setupStrapi = async () => {
+    global.strapiInstance = await strapi().load(); 
+    global.strapiInstance.server.mount()    
+    global.strapiServer = global.strapiInstance.server.app.callback();
+  }
+  
+  const teardownStrapi = () => {
+    global.strapiInstance.destroy().then(() => {
+        //delete test database after all tests
+        const dbSettings = global.strapiInstance.config.get('database.connections.default.settings');
+        if (dbSettings && dbSettings.filename) {
+            const tmpDbFile = `${__dirname}/../${dbSettings.filename}`;
+            if (fs.existsSync(tmpDbFile)) {
+                fs.unlinkSync(tmpDbFile);
+            }
+        }
+    })
+  }
+  
+
+module.exports = {setupStrapi, teardownStrapi}
+```
+
+We need a main entry file for our tests, one that will also test our 
+helper file.
 
 **Path —** `./tests/app.test.js`
 
 ```js
-const fs = require('fs');
-const { setupStrapi } = require('./helpers/strapi');
+const {setupStrapi, teardownStrapi} = require('./helpers/strapi')
 
 /** this code is called once before any test is called */
-beforeAll(async () => {
-  await setupStrapi(); // singleton so it can be called many times
-});
+beforeAll(setupStrapi);
 
 /** this code is called once before all the tested are finished */
-afterAll(async () => {
-  const dbSettings = strapi.config.get('database.connections.default.settings');
-  
-  //close server to release the db-file
-  await strapi.destroy();
+afterAll(teardownStrapi);
 
-  //delete test database after all tests
-  if (dbSettings && dbSettings.filename) {
-    const tmpDbFile = `${__dirname}/../${dbSettings.filename}`;
-    if (fs.existsSync(tmpDbFile)) {
-      fs.unlinkSync(tmpDbFile);
-    }
-  }
+it('strapi instance is defined', () => {
+  expect(global.strapiInstance).toBeDefined();
 });
 
-it('strapi is defined', () => {
-  expect(strapi).toBeDefined();
-});
 ```
 
 Actually this is all we need for writing unit tests. Just run `yarn test` and see a result of your first test
 
 ```bash
-yarn run v1.13.0
-$ jest
- PASS  tests/app.test.js
-  ✓ strapi is defined (2 ms)
+$ yarn test
+yarn run v1.22.17
+$ jest --forceExit --detectOpenHandles
+ PASS  tests/app.test.js (7.391 s)
+  ✓ strapi instance is defined (1 ms)
 
 Test Suites: 1 passed, 1 total
 Tests:       1 passed, 1 total
 Snapshots:   0 total
-Time:        4.187 s
+Time:        7.619 s
 Ran all test suites.
-✨  Done in 5.73s.
+✨  Done in 14.71s.
 ```
 
 :::tip
 If you receive a timeout error for Jest, please add the following line right before the `beforeAll` method in the `app.test.js` file: `jest.setTimeout(15000)` and adjust the milliseconds value as you need.
 :::
 
-
 ### Testing basic endpoint controller.
 
 ::: tip
-In the example we'll use and example `Hello world` `/hello` endpoint from [controllers](/developer-docs/latest/development/backend-customization/controllers.md) section.
+In the example we'll use and example `Hello world` `/api/hello` endpoint from [controllers](/developer-docs/latest/development/backend-customization/controllers.md) section.
 <!-- the link below is reported to have a missing hash by the check-links plugin, but everything is fine 🤷 -->
 :::
 
 Some might say that API tests are not unit but limited integration tests, regardless of nomenclature, let's continue with testing first endpoint.
 
-We'll test if our endpoint works properly and route `/hello` does return `Hello World`
+We'll test if our endpoint works properly and route `/api/hello` does return `Hello World`
 
 Let's create a separate test file where `supertest` will be used to check if endpoint works as expected.
 
-**Path —** `./tests/hello/index.js`
+**Path —** `./tests/hello/hello.test.js`
 
 ```js
 const request = require('supertest');
+const {setupStrapi, teardownStrapi} = require('../helpers/strapi')
+
+beforeAll(setupStrapi);
+afterAll(teardownStrapi);
 
 it('should return hello world', async () => {
-  await request(strapi.server) // app server is an instance of Class: http.Server
-    .get('/hello')
+  await request(global.strapiServer) // app server is an instance of Class: http.Server
+    .get('/api/hello')
     .expect(200) // Expect response http code 200
     .then(data => {
       expect(data.text).toBe('Hello World!'); // expect the response text
     });
 });
+
+
 ```
+Every test file that you write will have this structure.  Test file names need to include `.test.` to be found by Jest. 
 
-Then include this code to `./tests/app.test.js` at the bottom of that file
-
-```js
-require('./hello');
-```
-
-and run `yarn test` which should return
+Now run `yarn test` which should find both test files:
 
 ```bash
-➜  my-project yarn test
-yarn run v1.13.0
-$ jest --detectOpenHandles
- PASS  tests/app.test.js (5.742 s)
-  ✓ strapi is defined (4 ms)
-  ✓ should return hello world (208 ms)
+$ yarn run v1.22.17
+$ jest --forceExit --detectOpenHandles
+ PASS  tests/app.test.js
+ PASS  tests/hello/hello.test.js
+  ● Console
 
-[2020-05-22T14:37:38.018Z] debug GET /hello (58 ms) 200
-Test Suites: 1 passed, 1 total
+    console.log
+      [2022-01-31 11:39:07.914] http: GET /api/hello (17 ms) 200
+
+      at Console.log (node_modules/winston/lib/winston/transports/console.js:79:23)
+
+
+Test Suites: 2 passed, 2 total
 Tests:       2 passed, 2 total
 Snapshots:   0 total
-Time:        6.635 s, estimated 7 s
+Time:        5.284 s
 Ran all test suites.
-✨  Done in 9.09s.
 ```
 
 :::tip
-If you receive an error `Jest has detected the following 1 open handles potentially keeping Jest from exiting` check `jest` version as `26.6.3` works without an issue.
+If you receive an error `Jest has detected the following 1 open handles potentially keeping Jest from exiting`  **TODO: how to deal with this!**
 :::
 
 ### Testing `auth` endpoint controller.
